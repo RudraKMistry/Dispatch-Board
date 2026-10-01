@@ -99,16 +99,9 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onStatusCh
       </div>
       
       <div className="card-body">
-        <div className="route-info">
-          <span className="route-dot" style={{ backgroundColor: 'var(--text-primary)' }}></span>
-          <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{transport.origin}</span>
-        </div>
-        <div style={{ paddingLeft: '3px', margin: '2px 0' }}>
-          <div style={{ width: '2px', height: '16px', backgroundColor: 'var(--border-color)', marginLeft: '1px' }}></div>
-        </div>
-        <div className="route-info">
-          <span className="route-dot" style={{ backgroundColor: 'var(--accent-primary)' }}></span>
-          <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{transport.destination}</span>
+        <div style={{ marginBottom: '0.75rem' }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1rem' }}>To: {transport.companyName}</span>
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '0.25rem' }}>{transport.productName}</div>
         </div>
         
         <div className="note-section" onMouseDown={(e) => e.stopPropagation()}>
@@ -127,9 +120,9 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onStatusCh
             <Calendar />
             <span>{formattedDate}</span>
           </div>
-          <div className="meta-item" style={{ marginLeft: 'auto' }}>
-            <BoxIcon />
-            <span>{transport.productName ? `${transport.productName} (${transport.cargo})` : transport.cargo}</span>
+          <div className="meta-item" style={{ marginLeft: 'auto', color: 'var(--accent-primary)' }}>
+            <Calendar />
+            <span>Due: {transport.dueDate ? format(parseISO(transport.dueDate), 'MMM d, yyyy') : 'N/A'}</span>
           </div>
         </div>
       </div>
@@ -148,9 +141,8 @@ const Dashboard = () => {
     id: `TRP-${Math.floor(1000 + Math.random() * 9000)}`,
     displayId: '',
     productName: '',
-    origin: '',
-    destination: '',
-    cargo: '',
+    companyName: '',
+    dueDate: '',
     date: new Date().toISOString().split('T')[0]
   });
 
@@ -166,7 +158,9 @@ const Dashboard = () => {
         const mapped = data.map(d => ({
           ...d,
           displayId: d.display_id,
-          productName: d.product_name
+          productName: d.product_name,
+          companyName: d.company_name,
+          dueDate: d.due_date
         }));
         setTransports(mapped);
       }
@@ -259,9 +253,8 @@ const Dashboard = () => {
       display_id: newTransport.displayId,
       product_name: newTransport.productName,
       status: 'pending',
-      origin: newTransport.origin,
-      destination: newTransport.destination,
-      cargo: newTransport.cargo,
+      company_name: newTransport.companyName,
+      due_date: newTransport.dueDate ? new Date(newTransport.dueDate).toISOString() : null,
       date: dateObj.toISOString(),
       driver: 'Unassigned',
       note: ''
@@ -277,7 +270,9 @@ const Dashboard = () => {
       setTransports(prev => [{
         ...inserted,
         displayId: inserted.display_id,
-        productName: inserted.product_name
+        productName: inserted.product_name,
+        companyName: inserted.company_name,
+        dueDate: inserted.due_date
       }, ...prev]);
     }
     
@@ -286,9 +281,8 @@ const Dashboard = () => {
       id: '',
       displayId: '',
       productName: '',
-      origin: '',
-      destination: '',
-      cargo: '',
+      companyName: '',
+      dueDate: '',
       date: new Date().toISOString().split('T')[0]
     });
   };
@@ -446,11 +440,10 @@ const Dashboard = () => {
             </div>
             <form onSubmit={handleCreateTransport} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div><label>Custom ID / Tracking Number</label><input required type="text" value={newTransport.displayId} onChange={e => setNewTransport({...newTransport, displayId: e.target.value})} placeholder="e.g. ORD-12345" /></div>
+              <div><label>Company Name</label><input required type="text" value={newTransport.companyName} onChange={e => setNewTransport({...newTransport, companyName: e.target.value})} placeholder="e.g. Acme Corp" /></div>
               <div><label>Product Name</label><input required type="text" value={newTransport.productName} onChange={e => setNewTransport({...newTransport, productName: e.target.value})} placeholder="e.g. Gaming Laptops" /></div>
-              <div><label>Origin</label><input required type="text" value={newTransport.origin} onChange={e => setNewTransport({...newTransport, origin: e.target.value})} placeholder="e.g. New York, NY" /></div>
-              <div><label>Destination</label><input required type="text" value={newTransport.destination} onChange={e => setNewTransport({...newTransport, destination: e.target.value})} placeholder="e.g. Los Angeles, CA" /></div>
-              <div><label>Cargo Category</label><input required type="text" value={newTransport.cargo} onChange={e => setNewTransport({...newTransport, cargo: e.target.value})} placeholder="e.g. Electronics" /></div>
-              <div><label>Dispatch Date</label><input required type="date" value={newTransport.date} onChange={e => setNewTransport({...newTransport, date: e.target.value})} /></div>
+              <div><label>Due Date</label><input required type="date" value={newTransport.dueDate} onChange={e => setNewTransport({...newTransport, dueDate: e.target.value})} /></div>
+              <div><label>Date Placed</label><input required type="date" value={newTransport.date} onChange={e => setNewTransport({...newTransport, date: e.target.value})} /></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
                 <button type="button" className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">Create Transport</button>
