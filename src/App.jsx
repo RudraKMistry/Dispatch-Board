@@ -4,6 +4,7 @@ import { Package, Truck, CheckCircle, Calendar, FileText, X, LogOut, ArrowRight,
 import { format, parseISO } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import Login from './Login';
 import { supabase } from './supabaseClient';
 
@@ -17,7 +18,9 @@ const BoxIcon = () => (
   </svg>
 );
 
-const TransportCard = ({ transport, index, onDragStart, onNoteChange, onStatusChange, onRequestReverse }) => {
+const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductChange, onStatusChange, onRequestReverse, onClick }) => {
+  const [newProductItem, setNewProductItem] = useState('');
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'pending': return <Package size={18} />;
@@ -58,20 +61,50 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onStatusCh
     onRequestReverse(transport.id, prevStatus, getStatusText(prevStatus));
   };
 
+  const productsList = transport.productName ? transport.productName.split('\n').filter(Boolean) : [];
+
+  const handleAddProduct = (e) => {
+    e.preventDefault();
+    if (!newProductItem.trim()) return;
+    const updated = [...productsList, '[ ] ' + newProductItem.trim()].join('\n');
+    onProductChange(transport.id, updated);
+    setNewProductItem('');
+  };
+
+  const handleRemoveProduct = (i, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const updated = productsList.filter((_, idx) => idx !== i).join('\n');
+    onProductChange(transport.id, updated);
+  };
+
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   return (
     <div 
-      className="transport-card"
-      draggable
-      onDragStart={(e) => onDragStart(e, transport.id)}
-      style={{ cursor: 'grab' }}
+      className={`transport-card ${transport.status}`}
+      draggable={!isMobile}
+      onDragStart={(e) => {
+        if (isMobile) {
+          e.preventDefault();
+          return;
+        }
+        onDragStart(e, transport.id);
+      }}
+      onClick={onClick}
+      style={{ '--animation-order': index, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '1rem' }}
     >
-      <div className="card-header">
-        <div className="shipment-id">
-          <span style={{ color: 'var(--text-secondary)', marginRight: '4px', fontSize: '0.9rem' }}>#{index + 1}</span>
-          {getStatusIcon(transport.status)}
-          {transport.displayId}
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', margin: 0, padding: 0 }}>
+        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1.1rem', maxWidth: '65%', lineHeight: 1.2 }}>
+          To: {transport.companyName}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
           <span className={`status-chip ${transport.status}`}>
             {getStatusText(transport.status)}
           </span>
@@ -98,31 +131,192 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onStatusCh
         </div>
       </div>
       
-      <div className="card-body">
-        <div style={{ marginBottom: '0.75rem' }}>
-          <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '1rem' }}>To: {transport.companyName}</span>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '0.25rem' }}>{transport.productName}</div>
-        </div>
+      <div className="card-body" style={{ margin: 0, padding: 0 }}>
         
-        <div className="note-section" onMouseDown={(e) => e.stopPropagation()}>
-          <FileText size={14} style={{ marginTop: '2px', flexShrink: 0 }} />
-          <input 
-            type="text" 
-            className="note-input"
-            value={transport.note || ''}
-            onChange={(e) => onNoteChange(transport.id, e.target.value)}
-            placeholder="Add a note..."
-          />
-        </div>
+        {productsList.length > 0 && (
+          <div style={{ marginBottom: '0.75rem', fontSize: '0.875rem' }}>
+            <div style={{ fontWeight: 500, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+               <Package size={14} />
+               Products ({productsList.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {productsList.map((prod, i) => {
+                const cleanName = prod.replace(/^\[[x ]\] /, '');
+                const isChecked = prod.startsWith('[x] ');
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: isChecked ? 'var(--text-secondary)' : 'var(--text-primary)', textDecoration: isChecked ? 'line-through' : 'none' }}>
+                    <div style={{ width: '4px', height: '4px', borderRadius: '50%', backgroundColor: 'currentColor' }} />
+                    <span>{cleanName}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
-        <div className="meta-info">
-          <div className="meta-item">
-            <Calendar />
+        {transport.note && transport.note.trim() && (
+          <div style={{ marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+            <div style={{ fontWeight: 500, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+               <FileText size={14} />
+               Note
+            </div>
+            <div style={{ color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+              {transport.note}
+            </div>
+          </div>
+        )}
+
+        <div className="meta-info" style={{ marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            <Calendar size={14} />
             <span>{formattedDate}</span>
           </div>
-          <div className="meta-item" style={{ marginLeft: 'auto', color: 'var(--accent-primary)' }}>
-            <Calendar />
+          <div className="meta-item" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.85rem' }}>
+            <Calendar size={14} />
             <span>Due: {transport.dueDate ? format(parseISO(transport.dueDate), 'MMM d, yyyy') : 'N/A'}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChange, pdfMap, setPdfMap }) => {
+  const productsList = transport.productName ? transport.productName.split('\n').filter(Boolean) : [];
+  const [newProductItem, setNewProductItem] = useState('');
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleClose = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      onClose();
+    }, 400); // Wait for the reverse animation to complete
+  };
+
+  useEffect(() => {
+    // Prevent background scrolling and layout shift
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    document.body.style.paddingRight = `${scrollbarWidth}px`;
+    
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.paddingRight = '';
+    };
+  }, []);
+
+  const handleToggleCheck = (i) => {
+    const updated = [...productsList];
+    const item = updated[i];
+    if (item.startsWith('[x] ')) {
+      updated[i] = item.replace('[x] ', '[ ] ');
+    } else if (item.startsWith('[ ] ')) {
+      updated[i] = item.replace('[ ] ', '[x] ');
+    } else {
+      updated[i] = '[x] ' + item;
+    }
+    onProductChange(transport.id, updated.join('\n'));
+  };
+
+  const handleAddProduct = (e) => {
+    e.preventDefault();
+    if (!newProductItem.trim()) return;
+    const updated = [...productsList, '[ ] ' + newProductItem.trim()].join('\n');
+    onProductChange(transport.id, updated);
+    setNewProductItem('');
+  };
+
+  const handleRemoveProduct = (i) => {
+    const updated = productsList.filter((_, idx) => idx !== i).join('\n');
+    onProductChange(transport.id, updated);
+  };
+
+  const handlePdfUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setPdfMap(prev => ({ ...prev, [transport.id]: URL.createObjectURL(file) }));
+    }
+  };
+
+  return (
+    <div className={`modal-overlay ${isClosing ? 'overlay-reverse' : ''}`} onClick={handleClose} style={{ zIndex: 100 }}>
+      <div className={`modal-content modal-anim${isClosing ? '-reverse' : ''}`} onClick={e => e.stopPropagation()} style={{ width: '95%', maxWidth: '1400px', height: '90vh', display: 'flex', flexDirection: 'column' }}>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' }}>
+          <div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>To: {transport.companyName}</h2>
+          </div>
+          <button onClick={handleClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+            <X size={24} color="var(--text-secondary)" />
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ display: 'flex', gap: '2rem', flexGrow: 1, overflow: 'hidden' }}>
+          
+          <div className="modal-left-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.5rem', overflowY: 'auto', paddingRight: '1rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem' }}>Products Checklist</h3>
+              <div style={{ backgroundColor: 'var(--bg-input)', borderRadius: '8px', border: '1px solid var(--border-color)', padding: '1rem' }}>
+                <ul style={{ listStyleType: 'none', padding: 0, margin: '0 0 1rem 0' }}>
+                  {productsList.map((prod, i) => {
+                    const isChecked = prod.startsWith('[x] ');
+                    const cleanName = prod.replace(/^\[[x ]\] /, '');
+                    return (
+                      <li key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px dashed var(--border-color)' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', width: '100%' }}>
+                          <input type="checkbox" checked={isChecked} onChange={() => handleToggleCheck(i)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                          <span className={`checklist-text ${isChecked ? 'checked' : ''}`}>{cleanName}</span>
+                        </label>
+                        <button onClick={() => handleRemoveProduct(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={14} /></button>
+                      </li>
+                    );
+                  })}
+                  {productsList.length === 0 && <li style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>No products added</li>}
+                </ul>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input 
+                    type="text"
+                    value={newProductItem}
+                    onChange={(e) => setNewProductItem(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddProduct(e)}
+                    placeholder="Add a new product to list..."
+                    style={{ flexGrow: 1, padding: '0.5rem', border: '1px solid var(--border-color)', borderRadius: '4px', outline: 'none' }}
+                  />
+                  <button onClick={handleAddProduct} className="btn-primary" style={{ padding: '0 1rem' }}>Add</button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem' }}>Detailed Notes</h3>
+              <textarea 
+                value={transport.note || ''}
+                onChange={(e) => onNoteChange(transport.id, e.target.value)}
+                placeholder="Add detailed notes here..."
+                style={{ flexGrow: 1, minHeight: '150px', padding: '1rem', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', outline: 'none', resize: 'none', fontFamily: 'inherit' }}
+              />
+            </div>
+          </div>
+
+          <div className="modal-right-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-color)', paddingLeft: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Attached Document (PDF)</h3>
+              <label className="btn-secondary" style={{ cursor: 'pointer' }}>
+                <input type="file" accept="application/pdf" style={{ display: 'none' }} onChange={handlePdfUpload} />
+                Upload PDF
+              </label>
+            </div>
+            
+            <div style={{ flexGrow: 1, backgroundColor: 'var(--bg-input)', borderRadius: '8px', border: '1px solid var(--border-color)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {pdfMap[transport.id] ? (
+                <iframe src={pdfMap[transport.id]} width="100%" height="100%" style={{ border: 'none' }} title="PDF Viewer" />
+              ) : (
+                <div style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>
+                  <FileText size={48} style={{ opacity: 0.5, marginBottom: '1rem', margin: '0 auto' }} />
+                  <p>No PDF uploaded for this transport.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -135,12 +329,15 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedCardId, setSelectedCardId] = useState(null);
+  const selectedCard = transports.find(t => t.id === selectedCardId);
+  const [pdfMap, setPdfMap] = useState({});
   const [confirmReverse, setConfirmReverse] = useState({ show: false, id: null, prevStatus: null, prevStatusText: null });
   const [collapsedSections, setCollapsedSections] = useState({ pending: false, ongoing: false, completed: false });
   const [newTransport, setNewTransport] = useState({
     id: `TRP-${Math.floor(1000 + Math.random() * 9000)}`,
     displayId: '',
-    productName: '',
+    products: [''],
     companyName: '',
     dueDate: '',
     date: new Date().toISOString().split('T')[0]
@@ -198,7 +395,19 @@ const Dashboard = () => {
     const id = e.dataTransfer.getData('transportId');
     if (!id) return;
     
-    // Optimistic UI update
+    const transport = transports.find(t => t.id === id);
+    if (!transport || transport.status === status) return;
+    
+    const statusOrder = { pending: 1, ongoing: 2, completed: 3 };
+    
+    if (statusOrder[status] < statusOrder[transport.status]) {
+      // Reverse Flow
+      const prevStatusTextMap = { pending: 'Dispatch', ongoing: 'In Process' };
+      handleRequestReverse(id, status, prevStatusTextMap[status]);
+      return;
+    }
+    
+    // Normal Forward Flow - Optimistic UI update
     setTransports(prev => prev.map(t => {
       if (t.id === id) {
         return { ...t, status };
@@ -245,13 +454,26 @@ const Dashboard = () => {
     await supabase.from('transports').update({ note: newNote }).eq('id', id);
   };
 
+  const handleProductChange = async (id, newProducts) => {
+    // Optimistic update
+    setTransports(prev => prev.map(t => {
+      if (t.id === id) {
+        return { ...t, productName: newProducts };
+      }
+      return t;
+    }));
+
+    // Update Supabase (productName maps to product_name)
+    await supabase.from('transports').update({ product_name: newProducts }).eq('id', id);
+  };
+
   const handleCreateTransport = async (e) => {
     e.preventDefault();
     const dateObj = new Date(newTransport.date);
     
     const transportToInsert = {
-      display_id: newTransport.displayId,
-      product_name: newTransport.productName,
+      display_id: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
+      product_name: newTransport.products.filter(p => p.trim()).map(p => `[ ] ${p.trim()}`).join('\n'),
       status: 'pending',
       company_name: newTransport.companyName,
       due_date: newTransport.dueDate ? new Date(newTransport.dueDate).toISOString() : null,
@@ -280,14 +502,14 @@ const Dashboard = () => {
     setNewTransport({
       id: '',
       displayId: '',
-      productName: '',
+      products: [''],
       companyName: '',
       dueDate: '',
       date: new Date().toISOString().split('T')[0]
     });
   };
 
-  const handleExport = () => {
+  const handleExportPDF = () => {
     if (transports.length === 0) return alert("No data to export!");
 
     // Export PDF
@@ -298,11 +520,18 @@ const Dashboard = () => {
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
     doc.text(`Summary: ${pending.length} Pending | ${ongoing.length} Ongoing | ${completed.length} Completed`, 14, 36);
 
-    const tableData = transports.map(t => [t.id, t.displayId || '', t.productName || '', t.status.toUpperCase(), t.origin, t.destination, format(parseISO(t.date), 'MMM d, yyyy')]);
+    const tableData = transports.map(t => [
+      t.companyName || '',
+      t.productName ? t.productName.replace(/\[ \]\s*/g, '').replace(/\n/g, ', ') : '',
+      t.status.toUpperCase(),
+      t.dueDate ? format(parseISO(t.dueDate), 'MMM d, yyyy') : 'N/A',
+      t.date ? format(parseISO(t.date), 'MMM d, yyyy') : 'N/A',
+      t.note || ''
+    ]);
 
     autoTable(doc, {
       startY: 45,
-      head: [['System ID', 'Custom ID', 'Product', 'Status', 'Origin', 'Destination', 'Date']],
+      head: [['Company Name', 'Products', 'Status', 'Due Date', 'Placed Date', 'Notes']],
       body: tableData,
       theme: 'grid',
       styles: { fontSize: 9 },
@@ -310,6 +539,24 @@ const Dashboard = () => {
     });
 
     doc.save(`Dispatch_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  const handleExportExcel = () => {
+    if (transports.length === 0) return alert("No data to export!");
+    
+    const formattedData = transports.map(t => ({
+      'Company Name': t.companyName || '',
+      'Products': t.productName ? t.productName.replace(/\[ \]\s*/g, '').replace(/\n/g, ', ') : '',
+      'Status': t.status.toUpperCase(),
+      'Due Date': t.dueDate ? format(parseISO(t.dueDate), 'MMM d, yyyy') : 'N/A',
+      'Placed Date': t.date ? format(parseISO(t.date), 'MMM d, yyyy') : 'N/A',
+      'Notes': t.note || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(formattedData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transports');
+    XLSX.writeFile(workbook, `Dispatch_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const handleLogout = () => {
@@ -329,31 +576,13 @@ const Dashboard = () => {
           <p className="dashboard-subtitle">Monitor the live status of all goods shipments across the fleet.</p>
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-           <button 
-             onClick={handleExport}
-             style={{
-               backgroundColor: 'var(--bg-surface)', 
-               border: '1px solid var(--border-color)',
-               padding: '0.5rem 1rem',
-               borderRadius: 'var(--radius-md)',
-               fontWeight: 500,
-               cursor: 'pointer',
-               boxShadow: 'var(--shadow-sm)'
-             }}>
-             Export Report
+           <button onClick={handleExportPDF} className="btn-secondary">
+             Export PDF
            </button>
-           <button 
-             onClick={() => setIsModalOpen(true)}
-             style={{
-               backgroundColor: 'var(--accent-primary)', 
-               color: 'white',
-               border: 'none',
-               padding: '0.5rem 1rem',
-               borderRadius: 'var(--radius-md)',
-               fontWeight: 500,
-               cursor: 'pointer',
-               boxShadow: 'var(--shadow-sm)'
-             }}>
+           <button onClick={handleExportExcel} className="btn-secondary">
+             Export Excel
+           </button>
+           <button onClick={() => setIsModalOpen(true)} className="btn-primary">
              + New Transport
            </button>
            <div className="header-divider" style={{ width: '1px', height: '32px', backgroundColor: 'var(--border-color)', margin: '0 0.5rem' }}></div>
@@ -380,7 +609,7 @@ const Dashboard = () => {
           {!collapsedSections.pending && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {pending.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} />
               ))}
             </div>
           )}
@@ -401,7 +630,7 @@ const Dashboard = () => {
           {!collapsedSections.ongoing && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {ongoing.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} />
               ))}
             </div>
           )}
@@ -422,7 +651,7 @@ const Dashboard = () => {
           {!collapsedSections.completed && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {completed.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} />
               ))}
             </div>
           )}
@@ -439,9 +668,46 @@ const Dashboard = () => {
               </button>
             </div>
             <form onSubmit={handleCreateTransport} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div><label>Custom ID / Tracking Number</label><input required type="text" value={newTransport.displayId} onChange={e => setNewTransport({...newTransport, displayId: e.target.value})} placeholder="e.g. ORD-12345" /></div>
               <div><label>Company Name</label><input required type="text" value={newTransport.companyName} onChange={e => setNewTransport({...newTransport, companyName: e.target.value})} placeholder="e.g. Acme Corp" /></div>
-              <div><label>Product Name</label><input required type="text" value={newTransport.productName} onChange={e => setNewTransport({...newTransport, productName: e.target.value})} placeholder="e.g. Gaming Laptops" /></div>
+              
+              <div>
+                <label>Products Checklist</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                  {newTransport.products.map((prod, index) => (
+                    <div key={index} style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input 
+                        type="text" 
+                        value={prod} 
+                        onChange={e => {
+                          const newProducts = [...newTransport.products];
+                          newProducts[index] = e.target.value;
+                          setNewTransport({...newTransport, products: newProducts});
+                        }} 
+                        placeholder="e.g. Gaming Laptops" 
+                        style={{ flexGrow: 1, backgroundColor: 'var(--bg-surface)' }}
+                        required={index === 0 && newTransport.products.length === 1}
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const newProducts = newTransport.products.filter((_, i) => i !== index);
+                          setNewTransport({...newTransport, products: newProducts.length ? newProducts : ['']});
+                        }} 
+                        style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0 0.5rem' }}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  <button 
+                    type="button" 
+                    onClick={() => setNewTransport({...newTransport, products: [...newTransport.products, '']})}
+                    style={{ backgroundColor: 'var(--accent-primary)', color: '#000', border: 'none', borderRadius: '4px', padding: '0.5rem', cursor: 'pointer', fontWeight: 500, alignSelf: 'flex-start', fontSize: '0.85rem' }}
+                  >
+                    Add Product
+                  </button>
+                </div>
+              </div>
               <div><label>Due Date</label><input required type="date" value={newTransport.dueDate} onChange={e => setNewTransport({...newTransport, dueDate: e.target.value})} /></div>
               <div><label>Date Placed</label><input required type="date" value={newTransport.date} onChange={e => setNewTransport({...newTransport, date: e.target.value})} /></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
@@ -483,6 +749,17 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedCard && (
+        <TransportDetailsModal 
+          transport={selectedCard} 
+          onClose={() => setSelectedCardId(null)}
+          onNoteChange={handleNoteChange}
+          onProductChange={handleProductChange}
+          pdfMap={pdfMap}
+          setPdfMap={setPdfMap}
+        />
       )}
     </div>
   );
