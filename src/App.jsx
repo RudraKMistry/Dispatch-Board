@@ -559,9 +559,8 @@ const Dashboard = () => {
     XLSX.writeFile(workbook, `Dispatch_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('isAuthenticated');
-    navigate('/login');
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
   };
 
   const toggleSection = (section) => {
@@ -765,20 +764,43 @@ const Dashboard = () => {
   );
 };
 
-const ProtectedRoute = ({ children }) => {
-  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+const ProtectedRoute = ({ session, children }) => {
+  return session ? children : <Navigate to="/login" replace />;
 };
 
 function App() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Purge legacy mock authentication data
+    localStorage.removeItem('mockUsers');
+    localStorage.removeItem('isAuthenticated');
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) return null;
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={session ? <Navigate to="/" replace /> : <Login />} />
         <Route 
           path="/" 
           element={
-            <ProtectedRoute>
+            <ProtectedRoute session={session}>
               <Dashboard />
             </ProtectedRoute>
           } 

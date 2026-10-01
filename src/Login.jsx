@@ -1,35 +1,29 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Compass } from 'lucide-react';
+import { supabase } from './supabaseClient';
 
 const Login = () => {
   const [isLoginMode, setIsLoginMode] = useState(true);
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username || !password) return;
-
-    const savedUsers = JSON.parse(localStorage.getItem('mockUsers') || '[]');
-    const existingUser = savedUsers.find(u => u.username === username);
+    if (!email || !password) return;
 
     if (isLoginMode) {
-      if (existingUser && existingUser.password === password) {
-        localStorage.setItem('isAuthenticated', 'true');
-        navigate('/');
-      } else {
-        alert('Invalid username or password!');
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        alert(error.message);
       }
     } else {
-      if (existingUser) {
-        alert('Username already exists!');
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) {
+        alert(error.message);
       } else {
-        savedUsers.push({ username, password });
-        localStorage.setItem('mockUsers', JSON.stringify(savedUsers));
-        localStorage.setItem('isAuthenticated', 'true');
-        navigate('/');
+        alert('Check your email for the confirmation link!');
       }
     }
   };
@@ -44,12 +38,12 @@ const Login = () => {
         
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Username</label>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Email</label>
             <input 
-              type="text" 
-              placeholder="Enter your username" 
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              type="email" 
+              placeholder="Enter your email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               required
               className="login-input"
             />
