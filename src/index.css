@@ -290,7 +290,7 @@ body {
 }
 
 .modal-content {
-  background-color: #111;
+  background-color: var(--bg-surface);
   border-radius: var(--radius-lg);
   padding: 2.5rem;
   width: 90%;
@@ -322,8 +322,8 @@ body {
 }
 
 .btn-primary {
-  background-color: #ededed;
-  color: #000000 !important;
+  background-color: var(--accent-primary);
+  color: var(--bg-surface) !important;
   border: none;
   padding: 0.75rem 1.5rem;
   border-radius: var(--radius-md);
@@ -333,9 +333,9 @@ body {
 }
 
 .btn-primary:hover {
-  background-color: #ffffff;
+  background-color: var(--accent-hover);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px var(--border-highlight);
 }
 
 .btn-primary:active {
@@ -345,8 +345,8 @@ body {
 
 .btn-secondary {
   background-color: transparent;
-  color: #ededed !important;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color);
   padding: 0.75rem 1.5rem;
   border-radius: var(--radius-md);
   font-weight: 500;
@@ -355,8 +355,8 @@ body {
 }
 
 .btn-secondary:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-  color: #ffffff !important;
+  background-color: var(--bg-input);
+  color: var(--text-primary) !important;
   transform: translateY(-2px);
 }
 
@@ -399,8 +399,8 @@ input, textarea, select {
 
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--border-highlight);
 }
 
 label {
@@ -425,6 +425,23 @@ label {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
+}
+
+/* Login Page Styles */
+.login-card {
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem;
+  width: 100%;
+  max-width: 450px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-highlight);
+  color: var(--text-primary);
+  margin: 0 auto;
+}
+
+.login-input {
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
 /* Mobile Responsiveness */

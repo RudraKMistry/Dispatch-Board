@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Package, Truck, CheckCircle, Calendar, FileText, X, LogOut, ArrowRight, ArrowLeft, AlertTriangle, ChevronDown, ChevronRight, Settings, Edit, Trash2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import jsPDF from 'jspdf';
@@ -9,27 +9,16 @@ import { saveAs } from 'file-saver';
 import Login from './Login';
 import { supabase } from './supabaseClient';
 
+const safeFormatDate = (dateString, formatStr = 'MMM d, yyyy') => {
+  if (!dateString) return 'N/A';
+  try {
+    return format(parseISO(dateString), formatStr);
+  } catch {
+    return 'Invalid Date';
+  }
+};
 
-
-const BoxIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-    <line x1="12" y1="22.08" x2="12" y2="12"></line>
-  </svg>
-);
-
-const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductChange, onStatusChange, onRequestReverse, onClick, onDelete, hasPdf }) => {
-  const [newProductItem, setNewProductItem] = useState('');
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'pending': return <Package size={18} />;
-      case 'ongoing': return <Truck size={18} />;
-      case 'completed': return <CheckCircle size={18} />;
-      default: return null;
-    }
-  };
+const TransportCard = ({ transport, index, onDragStart, onStatusChange, onRequestReverse, onClick, onDelete, hasPdf }) => {
 
   const getStatusText = (status) => {
     switch (status) {
@@ -40,7 +29,7 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
     }
   };
 
-  const formattedDate = format(parseISO(transport.date), 'MMM d, yyyy');
+  const formattedDate = safeFormatDate(transport.date);
 
   const nextStatusMap = {
     pending: 'ongoing',
@@ -64,20 +53,7 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
 
   const productsList = transport.productName ? transport.productName.split('\n').filter(Boolean) : [];
 
-  const handleAddProduct = (e) => {
-    e.preventDefault();
-    if (!newProductItem.trim()) return;
-    const updated = [...productsList, '[ ] ' + newProductItem.trim()].join('\n');
-    onProductChange(transport.id, updated);
-    setNewProductItem('');
-  };
 
-  const handleRemoveProduct = (i, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const updated = productsList.filter((_, idx) => idx !== i).join('\n');
-    onProductChange(transport.id, updated);
-  };
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   
@@ -190,7 +166,7 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
           )}
           <div className="meta-item" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.85rem' }}>
             <Calendar size={14} />
-            <span>Due: {transport.dueDate ? format(parseISO(transport.dueDate), 'MMM d, yyyy') : 'N/A'}</span>
+            <span>Due: {safeFormatDate(transport.dueDate)}</span>
           </div>
         </div>
       </div>
@@ -202,6 +178,17 @@ const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChan
   const productsList = transport.productName ? transport.productName.split('\n').filter(Boolean) : [];
   const [newProductItem, setNewProductItem] = useState('');
   const [isClosing, setIsClosing] = useState(false);
+  const [localNote, setLocalNote] = useState(transport.note || '');
+
+  useEffect(() => {
+    setLocalNote(transport.note || '');
+  }, [transport.note]);
+
+  const handleNoteBlur = () => {
+    if (localNote !== transport.note) {
+      onNoteChange(transport.id, localNote);
+    }
+  };
 
   const handleClose = () => {
     setIsClosing(true);
@@ -265,7 +252,14 @@ const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChan
         alert('Failed to upload PDF. Check if the "pdfs" bucket exists and is public.');
       } else {
         const { data: publicUrlData } = supabase.storage.from('pdfs').getPublicUrl(fileName);
-        setPdfMap(prev => ({ ...prev, [transport.id]: publicUrlData.publicUrl }));
+        
+        // Revoke the old object URL to prevent memory leaks
+        setPdfMap(prev => {
+          if (prev[transport.id] && prev[transport.id].startsWith('blob:')) {
+            URL.revokeObjectURL(prev[transport.id]);
+          }
+          return { ...prev, [transport.id]: publicUrlData.publicUrl };
+        });
       }
     }
   };
@@ -330,8 +324,9 @@ const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChan
             <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem' }}>Detailed Notes</h3>
               <textarea 
-                value={transport.note || ''}
-                onChange={(e) => onNoteChange(transport.id, e.target.value)}
+                value={localNote}
+                onChange={(e) => setLocalNote(e.target.value)}
+                onBlur={handleNoteBlur}
                 placeholder="Add detailed notes here..."
                 style={{ flexGrow: 1, minHeight: '150px', padding: '1rem', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', outline: 'none', resize: 'none', fontFamily: 'inherit' }}
               />
@@ -353,7 +348,7 @@ const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChan
               ) : (
                 <div style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>
                   <FileText size={48} style={{ opacity: 0.5, marginBottom: '1rem', margin: '0 auto' }} />
-                  <p>No PDF uploaded for this transport.</p>
+                  <p>No PDF uploaded for this dispatch.</p>
                 </div>
               )}
             </div>
@@ -379,22 +374,33 @@ const Dashboard = () => {
   const [passwordForm, setPasswordForm] = useState({ newPassword: '' });
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTransport, setEditingTransport] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsModalOpen(false);
+        setIsSettingsOpen(false);
+        setIsEditModalOpen(false);
+        setSelectedCardId(null);
+        setConfirmReverse({ show: false, id: null, prevStatus: null, prevStatusText: null });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
-  const [newTransport, setNewTransport] = useState({
-    id: `TRP-${Math.floor(1000 + Math.random() * 9000)}`,
-    displayId: '',
+  const [newTransport, setNewTransport] = useState(() => ({
     products: [''],
     companyName: '',
     dueDate: '',
     date: new Date().toISOString().split('T')[0],
     pdfFile: null
-  });
-
-  const navigate = useNavigate();
+  }));
 
   // Fetch from Supabase
   useEffect(() => {
@@ -435,7 +441,20 @@ const Dashboard = () => {
 
     // Subscribe to realtime changes
     const channel = supabase.channel('transports-all')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transports' }, fetchTransports)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transports' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const d = payload.new;
+          setTransports(prev => {
+            if (prev.some(t => t.id === d.id)) return prev;
+            return [{ ...d, displayId: d.display_id, productName: d.product_name, companyName: d.company_name, dueDate: d.due_date }, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const d = payload.new;
+          setTransports(prev => prev.map(t => t.id === d.id ? { ...d, displayId: d.display_id, productName: d.product_name, companyName: d.company_name, dueDate: d.due_date } : t));
+        } else if (payload.eventType === 'DELETE') {
+          setTransports(prev => prev.filter(t => t.id !== payload.old.id));
+        }
+      })
       .subscribe();
 
     return () => {
@@ -473,30 +492,39 @@ const Dashboard = () => {
       handleRequestReverse(id, status, prevStatusTextMap[status]);
       return;
     }
+
+    if (statusOrder[status] > statusOrder[transport.status] + 1) {
+      // Prevent skipping statuses forward
+      return;
+    }
     
     // Normal Forward Flow - Optimistic UI update
-    setTransports(prev => prev.map(t => {
-      if (t.id === id) {
-        return { ...t, status };
-      }
-      return t;
-    }));
+    setTransports(prev => prev.map(t => t.id === id ? { ...t, status } : t));
 
-    // Update Supabase
-    await supabase.from('transports').update({ status }).eq('id', id);
+    // Update Supabase with error handling
+    try {
+      const { error } = await supabase.from('transports').update({ status }).eq('id', id);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Failed to update status', err);
+      // Revert on failure
+      setTransports(prev => prev.map(t => t.id === id ? { ...t, status: transport.status } : t));
+    }
   };
 
   const handleStatusChange = async (id, status) => {
-    // Optimistic UI update
-    setTransports(prev => prev.map(t => {
-      if (t.id === id) {
-        return { ...t, status };
-      }
-      return t;
-    }));
+    const oldTransport = transports.find(t => t.id === id);
+    if (!oldTransport) return;
+
+    setTransports(prev => prev.map(t => t.id === id ? { ...t, status } : t));
     
-    // Update Supabase
-    await supabase.from('transports').update({ status }).eq('id', id);
+    try {
+      const { error } = await supabase.from('transports').update({ status }).eq('id', id);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Failed to update status', err);
+      setTransports(prev => prev.map(t => t.id === id ? { ...t, status: oldTransport.status } : t));
+    }
   };
 
   const handleRequestReverse = (id, prevStatus, prevStatusText) => {
@@ -509,33 +537,38 @@ const Dashboard = () => {
   };
 
   const handleNoteChange = async (id, newNote) => {
-    // Optimistic update
-    setTransports(prev => prev.map(t => {
-      if (t.id === id) {
-        return { ...t, note: newNote };
-      }
-      return t;
-    }));
+    const oldTransport = transports.find(t => t.id === id);
+    if (!oldTransport) return;
 
-    // Update Supabase
-    await supabase.from('transports').update({ note: newNote }).eq('id', id);
+    setTransports(prev => prev.map(t => t.id === id ? { ...t, note: newNote } : t));
+
+    try {
+      const { error } = await supabase.from('transports').update({ note: newNote }).eq('id', id);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Failed to update note', err);
+      setTransports(prev => prev.map(t => t.id === id ? { ...t, note: oldTransport.note } : t));
+    }
   };
 
   const handleProductChange = async (id, newProducts) => {
-    // Optimistic update
-    setTransports(prev => prev.map(t => {
-      if (t.id === id) {
-        return { ...t, productName: newProducts };
-      }
-      return t;
-    }));
+    const oldTransport = transports.find(t => t.id === id);
+    if (!oldTransport) return;
 
-    // Update Supabase (productName maps to product_name)
-    await supabase.from('transports').update({ product_name: newProducts }).eq('id', id);
+    setTransports(prev => prev.map(t => t.id === id ? { ...t, productName: newProducts } : t));
+
+    try {
+      const { error } = await supabase.from('transports').update({ product_name: newProducts }).eq('id', id);
+      if (error) throw error;
+    } catch (err) {
+      console.error('Failed to update products', err);
+      setTransports(prev => prev.map(t => t.id === id ? { ...t, productName: oldTransport.productName } : t));
+    }
   };
 
   const handleCreateTransport = async (e) => {
     e.preventDefault();
+    setIsSubmitting(true);
     const dateObj = new Date(newTransport.date);
     
     const transportToInsert = {
@@ -545,15 +578,14 @@ const Dashboard = () => {
       company_name: newTransport.companyName,
       due_date: newTransport.dueDate ? new Date(newTransport.dueDate).toISOString() : null,
       date: dateObj.toISOString(),
-      driver: 'Unassigned',
       note: ''
     };
 
     const { data, error } = await supabase.from('transports').insert([transportToInsert]).select();
     
     if (error) {
-      console.error('Error creating transport:', error);
-      alert('Failed to create transport.');
+      console.error('Error creating dispatch:', error);
+      alert('Failed to create dispatch.');
     } else if (data && data.length > 0) {
       const inserted = data[0];
       setTransports(prev => [{
@@ -577,21 +609,27 @@ const Dashboard = () => {
       }
     }
     
+    handleCloseNewTransport();
+    setIsSubmitting(false);
+  };
+
+  const handleCloseNewTransport = () => {
     setIsModalOpen(false);
     setNewTransport({
-      id: '',
-      displayId: '',
       products: [''],
       companyName: '',
       dueDate: '',
       date: new Date().toISOString().split('T')[0],
       pdfFile: null
     });
+    const fileInput = document.getElementById('pdf-upload-input');
+    if (fileInput) fileInput.value = '';
   };
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!editingTransport) return;
+    setIsSubmitting(true);
     
     // Update local state
     setTransports(prev => prev.map(t => {
@@ -600,21 +638,31 @@ const Dashboard = () => {
           ...t,
           companyName: editingTransport.companyName,
           dueDate: editingTransport.dueDate,
-          date: editingTransport.date
+          date: editingTransport.date,
+          productName: editingTransport.productName,
+          note: editingTransport.note
         };
       }
       return t;
     }));
     
     // Update Supabase
-    await supabase.from('transports').update({
-      company_name: editingTransport.companyName,
-      due_date: editingTransport.dueDate ? new Date(editingTransport.dueDate).toISOString() : null,
-      date: new Date(editingTransport.date).toISOString()
-    }).eq('id', editingTransport.id);
+    try {
+      await supabase.from('transports').update({
+        company_name: editingTransport.companyName,
+        product_name: editingTransport.productName,
+        note: editingTransport.note,
+        due_date: editingTransport.dueDate ? new Date(editingTransport.dueDate).toISOString() : null,
+        date: editingTransport.date ? new Date(editingTransport.date).toISOString() : new Date().toISOString()
+      }).eq('id', editingTransport.id);
+    } catch(err) {
+      console.error(err);
+      alert('Failed to save edits. Invalid date format.');
+    }
     
     setIsEditModalOpen(false);
     setEditingTransport(null);
+    setIsSubmitting(false);
   };
 
   const handleDeleteTransport = async (id) => {
@@ -622,6 +670,17 @@ const Dashboard = () => {
     setTransports(prev => prev.filter(t => t.id !== id));
     // Update Supabase
     await supabase.from('transports').delete().eq('id', id);
+    // Delete associated PDF
+    const fileName = `${id}.pdf`;
+    await supabase.storage.from('pdfs').remove([fileName]);
+    setPdfMap(prev => {
+      const newMap = { ...prev };
+      if (newMap[id] && newMap[id].startsWith('blob:')) {
+        URL.revokeObjectURL(newMap[id]);
+      }
+      delete newMap[id];
+      return newMap;
+    });
   };
 
   const handleUpdatePassword = async (e) => {
@@ -637,28 +696,29 @@ const Dashboard = () => {
   };
 
   const handleExportPDF = () => {
-    if (transports.length === 0) return alert("No data to export!");
+    try {
+      if (transports.length === 0) return alert("No data to export!");
 
-    // Export PDF in landscape to better fit the 6 columns
-    const doc = new jsPDF('landscape');
-    
-    doc.setFontSize(22);
-    doc.setTextColor(31, 78, 120); // Corporate Blue
-    doc.text('DISPATCH & LOGISTICS REPORT', 14, 22);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Generated on: ${format(new Date(), 'MMMM d, yyyy')}  |  Total Records: ${transports.length}`, 14, 30);
-    doc.text(`Summary: ${pending.length} Pending | ${ongoing.length} Ongoing | ${completed.length} Completed`, 14, 36);
+      // Export PDF in landscape to better fit the 6 columns
+      const doc = new jsPDF('landscape');
+      
+      doc.setFontSize(22);
+      doc.setTextColor(31, 78, 120); // Corporate Blue
+      doc.text('DISPATCH & LOGISTICS REPORT', 14, 22);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated on: ${format(new Date(), 'MMMM d, yyyy')}  |  Total Records: ${transports.length}`, 14, 30);
+      doc.text(`Summary: ${pending.length} Pending | ${ongoing.length} Ongoing | ${completed.length} Completed`, 14, 36);
 
-    const tableData = transports.map(t => [
-      t.companyName || '',
-      t.productName ? t.productName.replace(/\[[ x]\]\s*/gi, '').replace(/\n/g, ', ') : '',
-      t.status.toUpperCase(),
-      t.dueDate ? format(parseISO(t.dueDate), 'MMM d, yyyy') : 'N/A',
-      t.date ? format(parseISO(t.date), 'MMM d, yyyy') : 'N/A',
-      t.note || ''
-    ]);
+      const tableData = transports.map(t => [
+        t.companyName || '',
+        t.productName ? t.productName.replace(/\[[ x]\]\s*/gi, '').replace(/\n/g, ', ') : '',
+        t.status.toUpperCase(),
+        t.dueDate ? safeFormatDate(t.dueDate) : 'N/A',
+        t.date ? safeFormatDate(t.date) : 'N/A',
+        t.note || ''
+      ]);
 
     autoTable(doc, {
       startY: 45,
@@ -699,8 +759,12 @@ const Dashboard = () => {
       }
     });
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    doc.save(`Dispatch_Report_${timestamp}.pdf`);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      doc.save(`Dispatch_Report_${timestamp}.pdf`);
+    } catch(err) {
+      console.error(err);
+      alert('Failed to export PDF');
+    }
   };
 
   const handleExportExcel = async () => {
@@ -708,7 +772,7 @@ const Dashboard = () => {
       if (transports.length === 0) return alert("No data to export!");
       
       const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('Transports', {
+      const worksheet = workbook.addWorksheet('Dispatches', {
         views: [
           { state: 'frozen', xSplit: 0, ySplit: 4, showGridLines: false }
         ]
@@ -768,8 +832,8 @@ const Dashboard = () => {
           t.companyName || '',
           t.productName ? t.productName.replace(/\[[ x]\]\s*/gi, '').replace(/\n/g, ', ') : '',
           t.status.toUpperCase(),
-          t.dueDate ? parseISO(t.dueDate) : '',
-          t.date ? parseISO(t.date) : '',
+          t.dueDate ? (new Date(t.dueDate).getTime() ? new Date(t.dueDate) : '') : '',
+          t.date ? (new Date(t.date).getTime() ? new Date(t.date) : '') : '',
           t.note || ''
         ];
 
@@ -838,7 +902,9 @@ const Dashboard = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    if (window.confirm("Are you sure you want to log out?")) {
+      await supabase.auth.signOut();
+    }
   };
 
   const toggleSection = (section) => {
@@ -874,6 +940,11 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px', color: 'var(--text-secondary)' }}>
+           Loading dispatches...
+        </div>
+      ) : (
       <div className="board">
         {/* Dispatch Column */}
         <div className="column" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, 'pending')}>
@@ -890,7 +961,7 @@ const Dashboard = () => {
           {!collapsedSections.pending && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {pending.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
               ))}
             </div>
           )}
@@ -911,7 +982,7 @@ const Dashboard = () => {
           {!collapsedSections.ongoing && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {ongoing.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
               ))}
             </div>
           )}
@@ -932,19 +1003,20 @@ const Dashboard = () => {
           {!collapsedSections.completed && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {completed.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
               ))}
             </div>
           )}
         </div>
       </div>
+      )}
 
       {isModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>New Dispatch</h2>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+              <button onClick={handleCloseNewTransport} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} color="var(--text-secondary)" />
               </button>
             </div>
@@ -991,14 +1063,13 @@ const Dashboard = () => {
               </div>
               <div>
                 <label>Attach PDF (Optional)</label>
-                <input type="file" accept="application/pdf" onChange={e => setNewTransport({...newTransport, pdfFile: e.target.files[0]})} style={{ padding: '0.5rem', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)', width: '100%', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }} />
+                <input id="pdf-upload-input" type="file" accept="application/pdf" onChange={e => setNewTransport({...newTransport, pdfFile: e.target.files[0]})} style={{ padding: '0.5rem', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)', width: '100%', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }} />
               </div>
               <div><label>Due Date</label><input required type="date" value={newTransport.dueDate} onChange={e => setNewTransport({...newTransport, dueDate: e.target.value})} /></div>
               <div><label>Date Placed</label><input required type="date" value={newTransport.date} onChange={e => setNewTransport({...newTransport, date: e.target.value})} /></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
-                <button type="button" className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
-                <button type="submit" className="btn-primary">Create Dispatch</button>
-
+                <button type="button" className="btn-secondary" onClick={handleCloseNewTransport} disabled={isSubmitting}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Create Dispatch'}</button>
               </div>
             </form>
           </div>
@@ -1013,9 +1084,9 @@ const Dashboard = () => {
                 <AlertTriangle size={32} color="#EF4444" />
               </div>
             </div>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>Reverse Transport?</h2>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>Reverse Dispatch?</h2>
             <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '0.95rem', lineHeight: 1.5 }}>
-              Are you sure you want to revert this transport back to <strong style={{ color: 'var(--text-primary)' }}>{confirmReverse.prevStatusText}</strong>? This will update the tracking status for all users.
+              Are you sure you want to revert this dispatch back to <strong style={{ color: 'var(--text-primary)' }}>{confirmReverse.prevStatusText}</strong>? This will update the tracking status for all users.
             </p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <button 
@@ -1104,18 +1175,20 @@ const Dashboard = () => {
         <div className="modal-overlay" style={{ zIndex: 100 }}>
           <div className="modal-content">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Edit Transport</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Edit Dispatch</h2>
               <button onClick={() => { setIsEditModalOpen(false); setEditingTransport(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} color="var(--text-secondary)" />
               </button>
             </div>
             <form onSubmit={handleEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div><label>Company Name</label><input required type="text" value={editingTransport.companyName} onChange={e => setEditingTransport({...editingTransport, companyName: e.target.value})} /></div>
+              <div><label>Company Name</label><input required type="text" value={editingTransport.companyName || ''} onChange={e => setEditingTransport({...editingTransport, companyName: e.target.value})} /></div>
+              <div><label>Products (Raw List)</label><textarea rows={3} value={editingTransport.productName || ''} onChange={e => setEditingTransport({...editingTransport, productName: e.target.value})} /></div>
+              <div><label>Notes</label><textarea rows={3} value={editingTransport.note || ''} onChange={e => setEditingTransport({...editingTransport, note: e.target.value})} /></div>
               <div><label>Due Date</label><input required type="date" value={editingTransport.dueDate ? editingTransport.dueDate.split('T')[0] : ''} onChange={e => setEditingTransport({...editingTransport, dueDate: e.target.value})} /></div>
               <div><label>Date Placed</label><input required type="date" value={editingTransport.date ? editingTransport.date.split('T')[0] : ''} onChange={e => setEditingTransport({...editingTransport, date: e.target.value})} /></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
-                <button type="button" className="btn-secondary" onClick={() => { setIsEditModalOpen(false); setEditingTransport(null); }}>Cancel</button>
-                <button type="submit" className="btn-primary">Save Changes</button>
+                <button type="button" className="btn-secondary" onClick={() => { setIsEditModalOpen(false); setEditingTransport(null); }} disabled={isSubmitting}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</button>
               </div>
             </form>
           </div>
