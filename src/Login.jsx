@@ -5,13 +5,14 @@ import { supabase } from './supabaseClient';
 
 const Login = () => {
   const [isLoginMode, setIsLoginMode] = useState(true);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email || !password) return;
+    if (!username || !password) return;
+    const email = `${username}@company-dashboard.com`;
 
     if (isLoginMode) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -23,7 +24,8 @@ const Login = () => {
       if (error) {
         alert(error.message);
       } else {
-        alert('Check your email for the confirmation link!');
+        alert('Account created successfully! You can now log in.');
+        setIsLoginMode(true);
       }
     }
   };
@@ -38,12 +40,12 @@ const Login = () => {
         
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Email</label>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Username</label>
             <input 
-              type="email" 
-              placeholder="Enter your email" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text" 
+              placeholder="Enter your username" 
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               required
               className="login-input"
             />

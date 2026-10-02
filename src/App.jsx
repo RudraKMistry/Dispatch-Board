@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { Package, Truck, CheckCircle, Calendar, FileText, X, LogOut, ArrowRight, ArrowLeft, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Package, Truck, CheckCircle, Calendar, FileText, X, LogOut, ArrowRight, ArrowLeft, AlertTriangle, ChevronDown, ChevronRight, Settings, Edit, Trash2 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import Login from './Login';
 import { supabase } from './supabaseClient';
 
@@ -18,7 +19,7 @@ const BoxIcon = () => (
   </svg>
 );
 
-const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductChange, onStatusChange, onRequestReverse, onClick }) => {
+const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductChange, onStatusChange, onRequestReverse, onClick, onDelete, hasPdf }) => {
   const [newProductItem, setNewProductItem] = useState('');
 
   const getStatusIcon = (status) => {
@@ -128,6 +129,16 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
               <ArrowRight size={14} />
             </button>
           )}
+          {onDelete && (
+            <button 
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); if(window.confirm('Delete this dispatch?')) onDelete(transport.id); }}
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{ background: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#EF4444' }}
+              title="Delete Dispatch"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
         </div>
       </div>
       
@@ -139,7 +150,7 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
                <Package size={14} />
                Products ({productsList.length})
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxHeight: '80px', overflowY: 'auto', paddingRight: '4px' }}>
               {productsList.map((prod, i) => {
                 const cleanName = prod.replace(/^\[[x ]\] /, '');
                 const isChecked = prod.startsWith('[x] ');
@@ -160,7 +171,7 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
                <FileText size={14} />
                Note
             </div>
-            <div style={{ color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            <div className="custom-scrollbar" style={{ color: 'var(--text-secondary)', maxHeight: '60px', overflowY: 'auto', paddingRight: '4px', whiteSpace: 'pre-wrap' }}>
               {transport.note}
             </div>
           </div>
@@ -171,6 +182,12 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
             <Calendar size={14} />
             <span>{formattedDate}</span>
           </div>
+          {hasPdf && (
+            <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--status-completed-text)', fontSize: '0.75rem', fontWeight: 600, border: '1px solid currentColor', padding: '0.1rem 0.4rem', borderRadius: '4px' }} title="PDF Attached">
+              <FileText size={12} />
+              <span>PDF</span>
+            </div>
+          )}
           <div className="meta-item" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--accent-primary)', fontWeight: 500, fontSize: '0.85rem' }}>
             <Calendar size={14} />
             <span>Due: {transport.dueDate ? format(parseISO(transport.dueDate), 'MMM d, yyyy') : 'N/A'}</span>
@@ -181,7 +198,7 @@ const TransportCard = ({ transport, index, onDragStart, onNoteChange, onProductC
   );
 };
 
-const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChange, pdfMap, setPdfMap }) => {
+const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChange, pdfMap, setPdfMap, onEdit, onDelete }) => {
   const productsList = transport.productName ? transport.productName.split('\n').filter(Boolean) : [];
   const [newProductItem, setNewProductItem] = useState('');
   const [isClosing, setIsClosing] = useState(false);
@@ -231,10 +248,25 @@ const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChan
     onProductChange(transport.id, updated);
   };
 
-  const handlePdfUpload = (e) => {
+  const handlePdfUpload = async (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Optimistic UI update
       setPdfMap(prev => ({ ...prev, [transport.id]: URL.createObjectURL(file) }));
+      
+      // Upload to Supabase Storage
+      const fileName = `${transport.id}.pdf`;
+      const { error } = await supabase.storage
+        .from('pdfs')
+        .upload(fileName, file, { upsert: true, contentType: 'application/pdf' });
+        
+      if (error) {
+        console.error('Error uploading PDF:', error);
+        alert('Failed to upload PDF. Check if the "pdfs" bucket exists and is public.');
+      } else {
+        const { data: publicUrlData } = supabase.storage.from('pdfs').getPublicUrl(fileName);
+        setPdfMap(prev => ({ ...prev, [transport.id]: publicUrlData.publicUrl }));
+      }
     }
   };
 
@@ -246,9 +278,17 @@ const TransportDetailsModal = ({ transport, onClose, onNoteChange, onProductChan
           <div>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>To: {transport.companyName}</h2>
           </div>
-          <button onClick={handleClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-            <X size={24} color="var(--text-secondary)" />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <button onClick={() => onEdit(transport)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--text-secondary)' }}>
+              <Edit size={18} />
+            </button>
+            <button onClick={() => { if(window.confirm('Delete this dispatch?')) { onDelete(transport.id); onClose(); } }} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', color: '#EF4444' }}>
+              <Trash2 size={18} />
+            </button>
+            <button onClick={handleClose} style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: '0.5rem' }}>
+              <X size={24} color="var(--text-secondary)" />
+            </button>
+          </div>
         </div>
 
         <div className="modal-body" style={{ display: 'flex', gap: '2rem', flexGrow: 1, overflow: 'hidden' }}>
@@ -334,13 +374,24 @@ const Dashboard = () => {
   const [pdfMap, setPdfMap] = useState({});
   const [confirmReverse, setConfirmReverse] = useState({ show: false, id: null, prevStatus: null, prevStatusText: null });
   const [collapsedSections, setCollapsedSections] = useState({ pending: false, ongoing: false, completed: false });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  const [passwordForm, setPasswordForm] = useState({ newPassword: '' });
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingTransport, setEditingTransport] = useState(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
   const [newTransport, setNewTransport] = useState({
     id: `TRP-${Math.floor(1000 + Math.random() * 9000)}`,
     displayId: '',
     products: [''],
     companyName: '',
     dueDate: '',
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split('T')[0],
+    pdfFile: null
   });
 
   const navigate = useNavigate();
@@ -364,7 +415,23 @@ const Dashboard = () => {
       setLoading(false);
     };
 
+    const fetchPdfs = async () => {
+      const { data, error } = await supabase.storage.from('pdfs').list();
+      if (!error && data) {
+        const newPdfMap = {};
+        data.forEach(file => {
+          if (file.name.endsWith('.pdf')) {
+            const transportId = file.name.replace('.pdf', '');
+            const { data: publicUrlData } = supabase.storage.from('pdfs').getPublicUrl(file.name);
+            newPdfMap[transportId] = publicUrlData.publicUrl;
+          }
+        });
+        setPdfMap(newPdfMap);
+      }
+    };
+
     fetchTransports();
+    fetchPdfs();
 
     // Subscribe to realtime changes
     const channel = supabase.channel('transports-all')
@@ -496,6 +563,18 @@ const Dashboard = () => {
         companyName: inserted.company_name,
         dueDate: inserted.due_date
       }, ...prev]);
+
+      // Upload PDF if attached
+      if (newTransport.pdfFile) {
+        const fileName = `${inserted.id}.pdf`;
+        const { error: uploadError } = await supabase.storage.from('pdfs').upload(fileName, newTransport.pdfFile, { upsert: true, contentType: 'application/pdf' });
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage.from('pdfs').getPublicUrl(fileName);
+          setPdfMap(prev => ({ ...prev, [inserted.id]: publicUrlData.publicUrl }));
+        } else {
+          alert('Dispatch created, but failed to upload the attached PDF.');
+        }
+      }
     }
     
     setIsModalOpen(false);
@@ -505,24 +584,76 @@ const Dashboard = () => {
       products: [''],
       companyName: '',
       dueDate: '',
-      date: new Date().toISOString().split('T')[0]
+      date: new Date().toISOString().split('T')[0],
+      pdfFile: null
     });
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingTransport) return;
+    
+    // Update local state
+    setTransports(prev => prev.map(t => {
+      if (t.id === editingTransport.id) {
+        return {
+          ...t,
+          companyName: editingTransport.companyName,
+          dueDate: editingTransport.dueDate,
+          date: editingTransport.date
+        };
+      }
+      return t;
+    }));
+    
+    // Update Supabase
+    await supabase.from('transports').update({
+      company_name: editingTransport.companyName,
+      due_date: editingTransport.dueDate ? new Date(editingTransport.dueDate).toISOString() : null,
+      date: new Date(editingTransport.date).toISOString()
+    }).eq('id', editingTransport.id);
+    
+    setIsEditModalOpen(false);
+    setEditingTransport(null);
+  };
+
+  const handleDeleteTransport = async (id) => {
+    // Update local state
+    setTransports(prev => prev.filter(t => t.id !== id));
+    // Update Supabase
+    await supabase.from('transports').delete().eq('id', id);
+  };
+
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    if (!passwordForm.newPassword) return;
+    const { error } = await supabase.auth.updateUser({ password: passwordForm.newPassword });
+    if (error) {
+      alert('Error updating password: ' + error.message);
+    } else {
+      alert('Password updated successfully!');
+      setPasswordForm({ newPassword: '' });
+    }
   };
 
   const handleExportPDF = () => {
     if (transports.length === 0) return alert("No data to export!");
 
-    // Export PDF
-    const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.text('Dispatch Board Report', 14, 22);
-    doc.setFontSize(11);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
+    // Export PDF in landscape to better fit the 6 columns
+    const doc = new jsPDF('landscape');
+    
+    doc.setFontSize(22);
+    doc.setTextColor(31, 78, 120); // Corporate Blue
+    doc.text('DISPATCH & LOGISTICS REPORT', 14, 22);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated on: ${format(new Date(), 'MMMM d, yyyy')}  |  Total Records: ${transports.length}`, 14, 30);
     doc.text(`Summary: ${pending.length} Pending | ${ongoing.length} Ongoing | ${completed.length} Completed`, 14, 36);
 
     const tableData = transports.map(t => [
       t.companyName || '',
-      t.productName ? t.productName.replace(/\[ \]\s*/g, '').replace(/\n/g, ', ') : '',
+      t.productName ? t.productName.replace(/\[[ x]\]\s*/gi, '').replace(/\n/g, ', ') : '',
       t.status.toUpperCase(),
       t.dueDate ? format(parseISO(t.dueDate), 'MMM d, yyyy') : 'N/A',
       t.date ? format(parseISO(t.date), 'MMM d, yyyy') : 'N/A',
@@ -531,32 +662,179 @@ const Dashboard = () => {
 
     autoTable(doc, {
       startY: 45,
-      head: [['Company Name', 'Products', 'Status', 'Due Date', 'Placed Date', 'Notes']],
+      head: [['COMPANY NAME', 'PRODUCTS', 'STATUS', 'DUE DATE', 'PLACED DATE', 'NOTES']],
       body: tableData,
-      theme: 'grid',
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [37, 99, 235] }
+      theme: 'striped',
+      styles: { 
+        fontSize: 9, 
+        cellPadding: 4, 
+        valign: 'middle' 
+      },
+      headStyles: { 
+        fillColor: [31, 78, 120], 
+        textColor: 255, 
+        fontStyle: 'bold', 
+        halign: 'left' 
+      },
+      columnStyles: {
+        0: { cellWidth: 40 },
+        1: { cellWidth: 70 },
+        2: { cellWidth: 25, halign: 'center' },
+        3: { cellWidth: 28, halign: 'center' },
+        4: { cellWidth: 28, halign: 'center' },
+        5: { cellWidth: 'auto' }
+      },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index === 2) {
+          const status = data.cell.raw;
+          data.cell.styles.fontStyle = 'bold';
+          if (status === 'COMPLETED') {
+            data.cell.styles.textColor = [47, 133, 90]; // Dark Green
+          } else if (status === 'ONGOING') {
+            data.cell.styles.textColor = [43, 108, 176]; // Blue
+          } else {
+            data.cell.styles.textColor = [192, 86, 33]; // Orange
+          }
+        }
+      }
     });
 
-    doc.save(`Dispatch_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    doc.save(`Dispatch_Report_${timestamp}.pdf`);
   };
 
-  const handleExportExcel = () => {
-    if (transports.length === 0) return alert("No data to export!");
-    
-    const formattedData = transports.map(t => ({
-      'Company Name': t.companyName || '',
-      'Products': t.productName ? t.productName.replace(/\[ \]\s*/g, '').replace(/\n/g, ', ') : '',
-      'Status': t.status.toUpperCase(),
-      'Due Date': t.dueDate ? format(parseISO(t.dueDate), 'MMM d, yyyy') : 'N/A',
-      'Placed Date': t.date ? format(parseISO(t.date), 'MMM d, yyyy') : 'N/A',
-      'Notes': t.note || ''
-    }));
+  const handleExportExcel = async () => {
+    try {
+      if (transports.length === 0) return alert("No data to export!");
+      
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Transports', {
+        views: [
+          { state: 'frozen', xSplit: 0, ySplit: 4, showGridLines: false }
+        ]
+      });
 
-    const worksheet = XLSX.utils.json_to_sheet(formattedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transports');
-    XLSX.writeFile(workbook, `Dispatch_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+      // Define columns (no headers yet, we will place them manually on row 4)
+      worksheet.columns = [
+        { key: 'companyName', width: 30 },
+        { key: 'products', width: 60 },
+        { key: 'status', width: 16 },
+        { key: 'dueDate', width: 18 },
+        { key: 'date', width: 18 },
+        { key: 'note', width: 60 }
+      ];
+
+      // 1. Add Report Title
+      worksheet.mergeCells('A1:F1');
+      const titleCell = worksheet.getCell('A1');
+      titleCell.value = 'DISPATCH & LOGISTICS REPORT';
+      titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF1F4E78' } };
+      titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+      // 2. Add Generation Metadata
+      worksheet.mergeCells('A2:F2');
+      const subtitleCell = worksheet.getCell('A2');
+      subtitleCell.value = `Generated on: ${format(new Date(), 'MMMM d, yyyy')}  |  Total Records: ${transports.length}`;
+      subtitleCell.font = { name: 'Segoe UI', size: 10, color: { argb: 'FF666666' }, italic: true };
+      subtitleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+      // 3. Add Table Headers (Row 4)
+      const headerRow = worksheet.getRow(4);
+      headerRow.values = ['COMPANY NAME', 'PRODUCTS', 'STATUS', 'DUE DATE', 'PLACED DATE', 'NOTES'];
+      headerRow.height = 25;
+      
+      headerRow.eachCell((cell, colNumber) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Segoe UI' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } }; // Corporate Blue
+        
+        // Center align Status and Dates. Left align others.
+        if (colNumber >= 3 && colNumber <= 5) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        } else {
+          cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+        }
+        
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF1F4E78' } },
+          bottom: { style: 'medium', color: { argb: 'FF102A43' } }
+        };
+      });
+
+      // 4. Add Data
+      let currentRow = 5;
+      transports.forEach((t, index) => {
+        const row = worksheet.getRow(currentRow);
+        row.values = [
+          t.companyName || '',
+          t.productName ? t.productName.replace(/\[[ x]\]\s*/gi, '').replace(/\n/g, ', ') : '',
+          t.status.toUpperCase(),
+          t.dueDate ? parseISO(t.dueDate) : '',
+          t.date ? parseISO(t.date) : '',
+          t.note || ''
+        ];
+
+        row.height = 24; 
+        
+        const isEven = index % 2 === 0;
+        
+        row.eachCell((cell, colNumber) => {
+          cell.font = { size: 10, name: 'Segoe UI', color: { argb: 'FF333333' } };
+          
+          // Center align Status and Dates. Left align others. Never wrap text.
+          if (colNumber >= 3 && colNumber <= 5) {
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false };
+          } else {
+            cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1, wrapText: false };
+          }
+          
+          // Subtle zebra striping
+          if (isEven) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } };
+          }
+
+          // Format dates correctly in Excel
+          if (colNumber === 4 || colNumber === 5) {
+            if (cell.value) {
+              cell.numFmt = 'mmm d, yyyy';
+            }
+          }
+
+          // Color code status text as a badge
+          if (colNumber === 3) {
+            const isComp = t.status === 'completed';
+            const isOng = t.status === 'ongoing';
+            
+            cell.font = { 
+              size: 9, 
+              name: 'Segoe UI', 
+              bold: true,
+              color: { argb: isComp ? 'FF2F855A' : isOng ? 'FF2B6CB0' : 'FFC05621' } 
+            };
+            cell.fill = { 
+              type: 'pattern', 
+              pattern: 'solid', 
+              fgColor: { argb: isComp ? 'FFC6F6D5' : isOng ? 'FFBEE3F8' : 'FFFEEBC8' } 
+            };
+          }
+
+          // Soft horizontal separators
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFEAEEF2' } } };
+        });
+        currentRow++;
+      });
+
+      // 5. Enable AutoFilter for the table (allows instant sorting/filtering in Excel)
+      worksheet.autoFilter = `A4:F${currentRow - 1}`;
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      saveAs(blob, `Dispatch_Report_${timestamp}.xlsx`);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export Excel file. Please try again. Error: " + err.message);
+    }
   };
 
   const handleLogout = async () => {
@@ -582,9 +860,13 @@ const Dashboard = () => {
              Export Excel
            </button>
            <button onClick={() => setIsModalOpen(true)} className="btn-primary">
-             + New Transport
+             + New Dispatch
            </button>
            <div className="header-divider" style={{ width: '1px', height: '32px', backgroundColor: 'var(--border-color)', margin: '0 0.5rem' }}></div>
+           <button onClick={() => setIsSettingsOpen(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', padding: '0.5rem' }}>
+             <Settings size={20} />
+             <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>Settings</span>
+           </button>
            <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', padding: '0.5rem' }}>
              <LogOut size={20} />
              <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>Logout</span>
@@ -608,7 +890,7 @@ const Dashboard = () => {
           {!collapsedSections.pending && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {pending.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
               ))}
             </div>
           )}
@@ -629,7 +911,7 @@ const Dashboard = () => {
           {!collapsedSections.ongoing && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {ongoing.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
               ))}
             </div>
           )}
@@ -650,7 +932,7 @@ const Dashboard = () => {
           {!collapsedSections.completed && (
             <div className="card-list" style={{ minHeight: '300px', paddingBottom: '2rem' }}>
               {completed.map((transport, index) => (
-                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} />
+                <TransportCard key={transport.id} transport={transport} index={index} onDragStart={handleDragStart} onNoteChange={handleNoteChange} onProductChange={handleProductChange} onStatusChange={handleStatusChange} onRequestReverse={handleRequestReverse} onClick={() => setSelectedCardId(transport.id)} onDelete={handleDeleteTransport} hasPdf={!!pdfMap[transport.id]} />
               ))}
             </div>
           )}
@@ -661,7 +943,7 @@ const Dashboard = () => {
         <div className="modal-overlay">
           <div className="modal-content">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Create New Transport</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>New Dispatch</h2>
               <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={20} color="var(--text-secondary)" />
               </button>
@@ -707,11 +989,16 @@ const Dashboard = () => {
                   </button>
                 </div>
               </div>
+              <div>
+                <label>Attach PDF (Optional)</label>
+                <input type="file" accept="application/pdf" onChange={e => setNewTransport({...newTransport, pdfFile: e.target.files[0]})} style={{ padding: '0.5rem', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)', width: '100%', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }} />
+              </div>
               <div><label>Due Date</label><input required type="date" value={newTransport.dueDate} onChange={e => setNewTransport({...newTransport, dueDate: e.target.value})} /></div>
               <div><label>Date Placed</label><input required type="date" value={newTransport.date} onChange={e => setNewTransport({...newTransport, date: e.target.value})} /></div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
                 <button type="button" className="btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
-                <button type="submit" className="btn-primary">Create Transport</button>
+                <button type="submit" className="btn-primary">Create Dispatch</button>
+
               </div>
             </form>
           </div>
@@ -758,7 +1045,81 @@ const Dashboard = () => {
           onProductChange={handleProductChange}
           pdfMap={pdfMap}
           setPdfMap={setPdfMap}
+          onEdit={(t) => { setEditingTransport(t); setIsEditModalOpen(true); setSelectedCardId(null); }}
+          onDelete={handleDeleteTransport}
         />
+      )}
+
+      {isSettingsOpen && (
+        <div className="modal-overlay" style={{ zIndex: 100 }}>
+          <div className="modal-content">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Settings</h2>
+              <button onClick={() => setIsSettingsOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} color="var(--text-secondary)" />
+              </button>
+            </div>
+            
+            <div style={{ marginBottom: '2rem' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 500, marginBottom: '1rem' }}>Theme Preferences</h3>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button 
+                  onClick={() => setTheme('light')} 
+                  className={theme === 'light' ? 'btn-primary' : 'btn-secondary'}
+                  style={{ flex: 1 }}
+                >
+                  Light Mode
+                </button>
+                <button 
+                  onClick={() => setTheme('dark')} 
+                  className={theme === 'dark' ? 'btn-primary' : 'btn-secondary'}
+                  style={{ flex: 1 }}
+                >
+                  Dark Mode
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 500, marginBottom: '1rem' }}>Change Password</h3>
+              <form onSubmit={handleUpdatePassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <label>New Password</label>
+                  <input 
+                    type="password" 
+                    value={passwordForm.newPassword} 
+                    onChange={e => setPasswordForm({ newPassword: e.target.value })} 
+                    placeholder="Enter new password" 
+                    required 
+                  />
+                </div>
+                <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }}>Update Password</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isEditModalOpen && editingTransport && (
+        <div className="modal-overlay" style={{ zIndex: 100 }}>
+          <div className="modal-content">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Edit Transport</h2>
+              <button onClick={() => { setIsEditModalOpen(false); setEditingTransport(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} color="var(--text-secondary)" />
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div><label>Company Name</label><input required type="text" value={editingTransport.companyName} onChange={e => setEditingTransport({...editingTransport, companyName: e.target.value})} /></div>
+              <div><label>Due Date</label><input required type="date" value={editingTransport.dueDate ? editingTransport.dueDate.split('T')[0] : ''} onChange={e => setEditingTransport({...editingTransport, dueDate: e.target.value})} /></div>
+              <div><label>Date Placed</label><input required type="date" value={editingTransport.date ? editingTransport.date.split('T')[0] : ''} onChange={e => setEditingTransport({...editingTransport, date: e.target.value})} /></div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
+                <button type="button" className="btn-secondary" onClick={() => { setIsEditModalOpen(false); setEditingTransport(null); }}>Cancel</button>
+                <button type="submit" className="btn-primary">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
